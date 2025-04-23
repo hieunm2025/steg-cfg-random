@@ -1,0 +1,62 @@
+FROM mfthomps/labtainer.base
+ARG lab
+ARG labdir
+ARG imagedir
+ARG user_name
+ARG password
+ARG apt_source
+ARG version
+LABEL version=$version
+
+# Set up package sources properly
+ENV APT_SOURCE $apt_source
+RUN /usr/bin/apt-source.sh
+
+# Install required packages with proper error handling
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python2.7 \
+    python-pip \
+    python-imaging \
+    python-numpy \
+    python-nltk \
+    vim \
+    netcat \
+    sshpass \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install NLTK data with proper error handling
+RUN python2.7 -c "import nltk; nltk.download('punkt'); nltk.download('averaged_perceptron_tagger')"
+
+# User setup with proper permissions
+RUN useradd -ms /bin/bash $user_name
+RUN echo "$user_name:$password" | chpasswd
+RUN adduser $user_name sudo
+RUN echo "$user_name ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Add system files if they exist
+COPY $labdir/$imagedir/sys_tar/sys.tar /
+RUN if [ -f /sys.tar ]; then tar xf /sys.tar && rm /sys.tar; fi
+
+# Add home directory files
+COPY $labdir/$imagedir/home_tar/home.tar /home/$user_name/
+RUN if [ -f /home/$user_name/home.tar ]; then \
+    cd /home/$user_name && tar xf home.tar && \
+    rm -f home.tar && \
+    chown -R $user_name:$user_name /home/$user_name; \
+    fi
+
+# Add lab files and set proper ownership
+ADD $labdir/$lab.tar.gz /home/$user_name/
+RUN chown -R $user_name:$user_name /home/$user_name
+
+# Switch to the user
+USER $user_name
+ENV HOME /home/$user_name
+WORKDIR $HOME
+
+# Switch back to root for init
+USER root
+
+# Use systemd as init
+CMD ["/bin/bash", "-c", "exec /sbin/init --log-target=journal 3>&1"]
